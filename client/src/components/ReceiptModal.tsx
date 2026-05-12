@@ -26,9 +26,12 @@ interface Sale {
   subtotal?:    number;
   discount?:    number;
   discountType?: "fixed" | "percent";
+  discountInput?: number;
+  flatDiscount?: number;
   tax?:         number;
   taxName?:     string;
   taxRate?:     number;
+  taxType?:     "inclusive" | "exclusive";
   total:        number;
   note?:        string;
   timestamp:    string;
@@ -41,15 +44,8 @@ interface ReceiptModalProps {
 }
 
 
-/* QR code encodes a small JSON blob so it's machine-readable */
-const buildQRData = (sale: Sale) =>
-  JSON.stringify({
-    inv:      String(sale.id).slice(-8).toUpperCase(),
-    total:    sale.total,
-    items:    sale.items.length,
-    cashier:  sale.cashier,
-    ts:       sale.timestamp,
-  });
+const buildReceiptUrl = (sale: Sale, baseUrl: string) =>
+  `${baseUrl}/receipt/${sale.id}`;
 
 export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, onClose }) => {
   const { formatCurrency, formatDate, formatTime, storeName, storeAddress, storePhone, receiptFooter, showQRCode, autoPrint } = useAppSettings();
@@ -57,14 +53,22 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, onClose }) => 
   const printRef  = useRef<HTMLDivElement>(null);
   const qrRef     = useRef<HTMLDivElement>(null);
   const didAutoPrint = useRef(false);
+  /* Use server-reported LAN IP so QR works on mobile, not localhost */
+  const [appUrl, setAppUrl] = React.useState(window.location.origin);
+  React.useEffect(() => {
+    fetch("/api/app-url").then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.url) setAppUrl(d.url); })
+      .catch(() => {});
+  }, []);
   const logoDataUrl = (() => { try { return localStorage.getItem("pos_logo") || ""; } catch { return ""; } })();
   const invoiceNo   = sale.invoiceNumber || String(sale.id).slice(-8).toUpperCase();
   const itemCount = sale.items.reduce((s, i) => s + i.quantity, 0);
-  const subtotal     = sale.subtotal     ?? sale.total;
-  const discount     = sale.discount     ?? 0;
-  const tax          = sale.tax          ?? 0;
-  const cashReceived = sale.cashReceived ?? 0;
-  const change       = sale.change       ?? 0;
+  const subtotal        = sale.subtotal     ?? sale.total;
+  const discount        = sale.discount     ?? 0;
+  const flatDiscountAmt = sale.flatDiscount ?? 0;
+  const tax             = sale.tax          ?? 0;
+  const cashReceived    = sale.cashReceived ?? 0;
+  const change          = sale.change       ?? 0;
 
   useEffect(() => {
     if (autoPrint && !didAutoPrint.current) {
@@ -158,18 +162,19 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({ sale, onClose }) => 
 <hr class="dash"/>
 <div class="row muted"><span>Payment</span><span class="bold">${(sale.paymentMethod || "Cash").toUpperCase()}</span></div>
 <div class="row muted"><span>Subtotal (${itemCount} item${itemCount !== 1 ? "s" : ""})</span><span>${fmt(subtotal)}</span></div>
-${discount > 0 ? `<div class="row discount"><span>Discount${sale.discountType === "percent" ? ` (${sale.discount}%)` : ""}</span><span>-${fmt(discount)}</span></div>` : ""}
-${tax > 0 ? `<div class="row muted"><span>${sale.taxName || "Tax"}${sale.taxRate ? ` (${sale.taxRate}%)` : ""}</span><span>${fmt(tax)}</span></div>` : ""}
+${discount > 0 ? `<div class="row discount"><span>Discount${sale.discountType === "percent" ? ` (${sale.discountInput != null ? sale.discountInput : ""}%)` : ""}</span><span>-${fmt(discount)}</span></div>` : ""}
+${flatDiscountAmt > 0 ? `<div class="row discount"><span>Flat Discount</span><span>-${fmt(flatDiscountAmt)}</span></div>` : ""}
+${tax > 0 ? `<div class="row muted"><span>${sale.taxType === "inclusive" ? "Incl. " : ""}${sale.taxName || "Tax"}${sale.taxRate ? ` (${sale.taxRate}%)` : ""}</span><span>${fmt(tax)}</span></div>` : ""}
 <div class="row grand"><span>TOTAL</span><span>${fmt(sale.total)}</span></div>
 ${cashReceived > 0 ? `
 <div class="row muted" style="margin-top:4px"><span>Cash Received</span><span>${fmt(cashReceived)}</span></div>
 <div class="row muted"><span>Change</span><span>${fmt(change)}</span></div>` : ""}
-${discount > 0 ? `<div style="text-align:right;font-size:10px;color:#166534;margin-top:3px">You saved ${fmt(discount)} 🎉</div>` : ""}
+${(discount > 0 || flatDiscountAmt > 0) ? `<div style="text-align:right;font-size:10px;color:#166534;margin-top:3px">You saved ${fmt(discount + flatDiscountAmt)} 🎉</div>` : ""}
 ${sale.note ? `<hr class="dash"/><div class="xs">Note: ${sale.note}</div>` : ""}
 <hr class="dash"/>
-<div class="center xs" style="margin-bottom:3px">Scan to Verify</div>
+<div class="center xs" style="margin-bottom:3px">Scan to verify receipt online</div>
 ${qrSvg}
-<div class="center xs" style="margin-top:4px">#${invoiceNo} · ${fmt(sale.total)}</div>
+<div class="center xs" style="margin-top:4px">#${invoiceNo}</div>
 <div class="footer">
   <div class="bold" style="font-size:11px;margin-bottom:2px">${receiptFooter || "Thank you for your business!"}</div>
   <div>Powered by ProPOS</div>
@@ -304,15 +309,31 @@ ${qrSvg}
                 <div className="flex justify-between text-xs text-emerald-600 font-semibold">
                   <span className="flex items-center gap-1">
                     <Tag size={10} />
-                    Discount{sale.discountType === "percent" ? ` (${sale.discount}%)` : ""}
+                    Discount{sale.discountType === "percent"
+                      ? ` (${sale.discountInput != null ? sale.discountInput : ""}%)`
+                      : ""}
                   </span>
                   <span className="font-mono">−{fmt(discount)}</span>
                 </div>
               )}
 
+              {flatDiscountAmt > 0 && (
+                <div className="flex justify-between text-xs text-emerald-600 font-semibold">
+                  <span className="flex items-center gap-1">
+                    <Tag size={10} />
+                    Flat Discount
+                  </span>
+                  <span className="font-mono">−{fmt(flatDiscountAmt)}</span>
+                </div>
+              )}
+
               {tax > 0 && (
                 <div className="flex justify-between text-xs text-zinc-500">
-                  <span>{sale.taxName ? `${sale.taxName}` : "Tax"}{sale.taxRate ? ` (${sale.taxRate}%)` : ""}</span>
+                  <span>
+                    {sale.taxType === "inclusive" ? "Incl. " : ""}
+                    {sale.taxName || "Tax"}
+                    {sale.taxRate ? ` (${sale.taxRate}%)` : ""}
+                  </span>
                   <span className="font-mono">{fmt(tax)}</span>
                 </div>
               )}
@@ -335,9 +356,9 @@ ${qrSvg}
                 </div>
               )}
 
-              {discount > 0 && (
+              {(discount > 0 || flatDiscountAmt > 0) && (
                 <p className="text-[10px] text-emerald-600 font-bold text-right">
-                  You saved {fmt(discount)} on this order 🎉
+                  You saved {fmt(discount + flatDiscountAmt)} on this order 🎉
                 </p>
               )}
             </div>
@@ -356,7 +377,7 @@ ${qrSvg}
                 <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-400">Scan to Verify</p>
                 <div ref={qrRef} className="p-3 bg-white border-2 border-zinc-100 rounded-2xl shadow-sm">
                   <QRCodeSVG
-                    value={buildQRData(sale)}
+                    value={buildReceiptUrl(sale, appUrl)}
                     size={120}
                     bgColor="#ffffff"
                     fgColor="#18181b"
@@ -365,7 +386,7 @@ ${qrSvg}
                   />
                 </div>
                 <p className="text-[9px] text-zinc-400 font-mono text-center">
-                  #{invoiceNo} · {fmt(sale.total)}
+                  Scan to verify online · #{invoiceNo}
                 </p>
               </div>
             )}

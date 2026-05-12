@@ -171,13 +171,17 @@ interface CheckoutPreviewProps {
   discountAmt: number;
   discountValue: number | "";
   discountType: "fixed" | "percent";
+  flatDiscountAmt: number;
   couponDiscount: number;
   couponCode: string;
   taxAmt: number;
+  inclusiveTaxAmt: number;
   taxConfig: TaxConfig | null;
   total: number;
   paymentMethods: PaymentMethodOption[];
   paymentMethodId: string;
+  cashReceived: number | "";
+  onCashReceivedChange: (v: number | "") => void;
   note: string;
   loading: boolean;
   onPaymentMethodChange: (id: string) => void;
@@ -187,11 +191,17 @@ interface CheckoutPreviewProps {
 
 const CheckoutPreview: React.FC<CheckoutPreviewProps> = ({
   cart, customer, subtotal, discountAmt, discountValue, discountType,
-  couponDiscount, couponCode,
-  taxAmt, taxConfig, total, paymentMethods, paymentMethodId, note, loading, onPaymentMethodChange, onConfirm, onClose,
+  flatDiscountAmt, couponDiscount, couponCode,
+  taxAmt, inclusiveTaxAmt, taxConfig, total, paymentMethods, paymentMethodId,
+  cashReceived, onCashReceivedChange,
+  note, loading, onPaymentMethodChange, onConfirm, onClose,
 }) => {
   const { formatCurrency } = useAppSettings();
   const itemCount = cart.reduce((s, i) => s + i.cartQuantity, 0);
+  const selectedMethod = paymentMethods.find(m => m._id === paymentMethodId);
+  const isCash = !selectedMethod || selectedMethod.type === "cash";
+  const cashAmt = Number(cashReceived) || 0;
+  const changeDue = isCash && cashAmt > total ? parseFloat((cashAmt - total).toFixed(2)) : 0;
 
   return (
     <motion.div
@@ -287,6 +297,12 @@ const CheckoutPreview: React.FC<CheckoutPreviewProps> = ({
               <span>−{formatCurrency(discountAmt)}</span>
             </div>
           )}
+          {flatDiscountAmt > 0 && (
+            <div className="flex justify-between text-xs text-emerald-600 font-semibold">
+              <span>Flat Discount</span>
+              <span>−{formatCurrency(flatDiscountAmt)}</span>
+            </div>
+          )}
           {couponDiscount > 0 && (
             <div className="flex justify-between text-xs text-violet-600 font-semibold">
               <span>Coupon {couponCode ? `(${couponCode})` : ""}</span>
@@ -299,6 +315,12 @@ const CheckoutPreview: React.FC<CheckoutPreviewProps> = ({
               <span>{formatCurrency(taxAmt)}</span>
             </div>
           )}
+          {inclusiveTaxAmt > 0 && (
+            <div className="flex justify-between text-xs text-zinc-400">
+              <span>Incl. {taxConfig ? `${taxConfig.name} (${taxConfig.rate}%)` : "Tax"}</span>
+              <span>{formatCurrency(inclusiveTaxAmt)}</span>
+            </div>
+          )}
           {note && (
             <div className="flex gap-2 pt-1">
               <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Note:</span>
@@ -309,6 +331,28 @@ const CheckoutPreview: React.FC<CheckoutPreviewProps> = ({
             <span className="text-sm font-bold text-zinc-900">Total Due</span>
             <span className="text-2xl font-black text-zinc-900">{formatCurrency(total)}</span>
           </div>
+
+          {/* Cash received + change — only for cash payments */}
+          {isCash && (
+            <div className="space-y-2 pt-2 border-t border-dashed border-zinc-100">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold text-zinc-600 flex-shrink-0">Cash Received</span>
+                <input
+                  type="number" min={total} step="any"
+                  value={cashReceived}
+                  onChange={e => onCashReceivedChange(e.target.value === "" ? "" : Math.max(0, +e.target.value))}
+                  placeholder={String(total.toFixed(2))}
+                  className="w-32 px-3 py-1.5 text-sm font-bold text-right bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-black/10"
+                />
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-semibold text-zinc-600">Change</span>
+                <span className={`text-lg font-black font-mono ${changeDue > 0 ? "text-emerald-600" : "text-zinc-300"}`}>
+                  {formatCurrency(changeDue)}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Actions */}
@@ -679,6 +723,8 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
   const [note, setNote]                 = useState("");
   const [discountValue, setDiscountVal] = useState<number | "">("");
   const [discountType, setDiscountType] = useState<"fixed" | "percent">("fixed");
+  const [flatDiscount, setFlatDiscount] = useState<number | "">("");
+  const [cashReceived, setCashReceived] = useState<number | "">("");
   const [customer, setCustomer]         = useState<Customer>(WALKIN);
   const [defaultTax, setDefaultTax]     = useState<TaxConfig | null>(null);
   const [showPreview, setShowPreview]       = useState(false);
@@ -801,7 +847,7 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
     }));
   };
   const clearCart = () => {
-    setCart([]); setDiscountVal(""); setNote(""); setCustomer(WALKIN);
+    setCart([]); setDiscountVal(""); setFlatDiscount(""); setCashReceived(""); setNote(""); setCustomer(WALKIN);
     setAppliedCoupon(null); setCouponCode(""); setCouponError(null);
   };
 
@@ -815,7 +861,7 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
       const res = await fetch("/api/coupons/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ code: couponCode.trim(), orderTotal: subtotal - discountAmt }),
+        body: JSON.stringify({ code: couponCode.trim(), orderTotal: subtotal - discountAmt - flatDiscountAmt }),
       });
       const data = await res.json();
       if (!res.ok) { setCouponError(data.message || "Invalid coupon"); return; }
@@ -884,12 +930,20 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
     const v = Number(discountValue) || 0;
     return discountType === "percent" ? Math.min((subtotal * v) / 100, subtotal) : Math.min(v, subtotal);
   }, [discountValue, discountType, subtotal]);
+  const flatDiscountAmt = useMemo(() => {
+    return Math.min(Number(flatDiscount) || 0, Math.max(0, subtotal - discountAmt));
+  }, [flatDiscount, subtotal, discountAmt]);
   const couponDiscount  = appliedCoupon?.discount ?? 0;
-  const taxableAmount   = subtotal - discountAmt;
+  const taxableAmount   = subtotal - discountAmt - flatDiscountAmt;
   const taxAmt = useMemo(() => {
     if (!defaultTax || defaultTax.rate === 0) return 0;
     if (defaultTax.type === "inclusive") return 0;
     return (taxableAmount * defaultTax.rate) / 100;
+  }, [defaultTax, taxableAmount]);
+  /* For inclusive taxes: extract the embedded tax for display (does not affect total) */
+  const inclusiveTaxDisplayAmt = useMemo(() => {
+    if (!defaultTax || defaultTax.rate === 0 || defaultTax.type !== "inclusive") return 0;
+    return parseFloat((taxableAmount * defaultTax.rate / (100 + defaultTax.rate)).toFixed(2));
   }, [defaultTax, taxableAmount]);
   const total = Math.max(0, taxableAmount + taxAmt - couponDiscount);
 
@@ -949,12 +1003,18 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
         subtotal:       Number(subtotal.toFixed(2)),
         discount:       Number(discountAmt.toFixed(2)),
         discountType,
+        discountInput:  Number(discountValue) || 0,
+        flatDiscount:   Number(flatDiscountAmt.toFixed(2)),
         couponCode:     appliedCoupon?.code || "",
         couponDiscount: Number(couponDiscount.toFixed(2)),
-        tax:            Number(taxAmt.toFixed(2)),
+        tax:            defaultTax?.type === "inclusive"
+                          ? Number(inclusiveTaxDisplayAmt.toFixed(2))
+                          : Number(taxAmt.toFixed(2)),
         taxName:        defaultTax?.name || "",
         taxRate:        defaultTax?.rate || 0,
+        taxType:        defaultTax?.type || "exclusive",
         paymentMethod:  normalizePaymentType(selectedPaymentMethod?.type),
+        cashReceived:   Number(cashReceived) || 0,
         total:          Number(total.toFixed(2)),
         note,
         items: cart.map(item => ({
@@ -1001,11 +1061,16 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
         subtotal:       Number(subtotal.toFixed(2)),
         discount:       Number(discountAmt.toFixed(2)),
         discountType,
+        discountInput:  Number(discountValue) || 0,
+        flatDiscount:   Number(flatDiscountAmt.toFixed(2)),
         couponCode:     appliedCoupon?.code || "",
         couponDiscount: Number(couponDiscount.toFixed(2)),
-        tax:            Number(taxAmt.toFixed(2)),
+        tax:            defaultTax?.type === "inclusive"
+                          ? Number(inclusiveTaxDisplayAmt.toFixed(2))
+                          : Number(taxAmt.toFixed(2)),
         taxName:        defaultTax?.name || "",
         taxRate:        defaultTax?.rate || 0,
+        taxType:        defaultTax?.type || "exclusive",
         paymentMethod:  "mobile_wallet",
         total:          Number(total.toFixed(2)),
         note,
@@ -1060,13 +1125,17 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
             discountAmt={discountAmt}
             discountValue={discountValue}
             discountType={discountType}
+            flatDiscountAmt={flatDiscountAmt}
             couponDiscount={couponDiscount}
             couponCode={appliedCoupon?.code || ""}
             taxAmt={taxAmt}
+            inclusiveTaxAmt={inclusiveTaxDisplayAmt}
             taxConfig={defaultTax}
             total={total}
             paymentMethods={paymentMethods}
             paymentMethodId={selectedPaymentMethodId}
+            cashReceived={cashReceived}
+            onCashReceivedChange={setCashReceived}
             note={note}
             loading={loading}
             onPaymentMethodChange={setSelectedPaymentMethodId}
@@ -1473,10 +1542,31 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
                   className="w-16 px-2 py-1 text-xs font-semibold text-right bg-zinc-50 border border-zinc-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-black/10" />
               </div>
             </div>
+            {/* Flat Discount input row */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <DollarSign size={11} className="text-zinc-400" />
+                <span className="text-xs text-zinc-500">Flat Discount</span>
+              </div>
+              <input
+                type="number" min="0"
+                max={Math.max(0, subtotal - discountAmt)}
+                value={flatDiscount}
+                onChange={e => setFlatDiscount(e.target.value === "" ? "" : Math.max(0, +e.target.value))}
+                placeholder="0.00"
+                className="w-20 px-2 py-1 text-xs font-semibold text-right bg-zinc-50 border border-zinc-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-black/10 ml-auto"
+              />
+            </div>
             {discountAmt > 0 && (
               <div className="flex justify-between text-xs text-emerald-600 font-semibold">
-                <span>Discount</span>
+                <span>Discount{discountType === "percent" ? ` (${discountValue}%)` : ""}</span>
                 <span>−{formatCurrency(discountAmt)}</span>
+              </div>
+            )}
+            {flatDiscountAmt > 0 && (
+              <div className="flex justify-between text-xs text-emerald-600 font-semibold">
+                <span>Flat Discount</span>
+                <span>−{formatCurrency(flatDiscountAmt)}</span>
               </div>
             )}
             {couponDiscount > 0 && (
@@ -1485,10 +1575,19 @@ export const POS: React.FC<POSProps> = ({ user, products, onCheckout, onShowRece
                 <span>−{formatCurrency(couponDiscount)}</span>
               </div>
             )}
-            <div className="flex justify-between text-xs text-zinc-500">
-              <span>{defaultTax ? `${defaultTax.name} (${defaultTax.rate}%)` : "Tax (0%)"}</span>
-              <span>{formatCurrency(taxAmt)}</span>
-            </div>
+            {defaultTax?.type === "inclusive" ? (
+              inclusiveTaxDisplayAmt > 0 ? (
+                <div className="flex justify-between text-xs text-zinc-400">
+                  <span>Incl. {defaultTax.name} ({defaultTax.rate}%)</span>
+                  <span>{formatCurrency(inclusiveTaxDisplayAmt)}</span>
+                </div>
+              ) : null
+            ) : (
+              <div className="flex justify-between text-xs text-zinc-500">
+                <span>{defaultTax ? `${defaultTax.name} (${defaultTax.rate}%)` : "Tax (0%)"}</span>
+                <span>{formatCurrency(taxAmt)}</span>
+              </div>
+            )}
             <div className="flex justify-between items-center pt-2 border-t border-zinc-50">
               <span className="text-sm font-bold text-zinc-900">Total</span>
               <span className="text-xl font-black text-zinc-900">{formatCurrency(total)}</span>

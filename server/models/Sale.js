@@ -21,9 +21,12 @@ const saleSchema = new mongoose.Schema({
   subtotal:      { type: Number, default: 0 },
   discount:      { type: Number, default: 0 },
   discountType:  { type: String, enum: ["fixed","percent"], default: "fixed" },
+  discountInput: { type: Number, default: 0 },   // original % input when discountType=percent
+  flatDiscount:  { type: Number, default: 0 },   // additional flat-$ discount
   tax:           { type: Number, default: 0 },
   taxName:       { type: String, default: "" },
   taxRate:       { type: Number, default: 0 },
+  taxType:       { type: String, enum: ["inclusive","exclusive"], default: "exclusive" },
   total:         { type: Number, required: true },
   paymentMethod: { type: String, enum: ["cash","card","mobile_wallet","bank_transfer","other"], default: "cash" },
   cashReceived:  { type: Number, default: 0 },

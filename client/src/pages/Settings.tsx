@@ -430,6 +430,22 @@ export const Settings: React.FC = () => {
 
   const saveSettings = () => {
     localStorage.setItem("pos_settings", JSON.stringify(settings));
+    /* Sync store-branding fields to DB so the public receipt page can display them */
+    const token = (() => { try { return JSON.parse(localStorage.getItem("pos_user") || "{}").token; } catch { return null; } })();
+    fetch("/api/store-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({
+        storeName:      settings.storeName,
+        storeAddress:   settings.storeAddress,
+        storePhone:     settings.storePhone,
+        storeEmail:     settings.storeEmail,
+        taxNumber:      settings.taxNumber,
+        currencySymbol: settings.currencySymbol,
+        receiptFooter:  settings.receiptFooter,
+        logoDataUrl:    (() => { try { return localStorage.getItem("pos_logo") || ""; } catch { return ""; } })(),
+      }),
+    }).catch(() => {});
     showToast("Settings saved successfully");
   };
 

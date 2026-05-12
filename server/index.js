@@ -1,5 +1,6 @@
-import express from "express";
-import https   from "https";
+import express            from "express";
+import https              from "https";
+import { networkInterfaces } from "os";
 import { createServer as createViteServer } from "vite";
 import { createRequire } from "module";
 import dotenv from "dotenv";
@@ -18,6 +19,7 @@ import walletPaymentRoutes   from "./routes/walletPayments.js";
 import importExportRoutes    from "./routes/importExport.js";
 import couponRoutes          from "./routes/coupons.js";
 import scanSessionRoutes     from "./routes/scanSessions.js";
+import storeConfigRoutes     from "./routes/storeConfig.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -50,8 +52,25 @@ async function startServer() {
   app.use("/api/import", importExportRoutes);
   app.use("/api", couponRoutes);
   app.use("/api/scan", scanSessionRoutes);
+  app.use("/api", storeConfigRoutes);
 
   app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+
+  /* Returns the LAN-reachable base URL so QR codes work on mobile devices */
+  app.get("/api/app-url", (req, res) => {
+    const fromEnv = process.env.APP_URL;
+    if (fromEnv && !fromEnv.startsWith("MY_") && !fromEnv.includes("localhost")) {
+      return res.json({ url: fromEnv });
+    }
+    const nets = networkInterfaces();
+    let lanIp = "localhost";
+    outer: for (const name of Object.keys(nets)) {
+      for (const net of (nets[name] || [])) {
+        if (net.family === "IPv4" && !net.internal) { lanIp = net.address; break outer; }
+      }
+    }
+    res.json({ url: `http://${lanIp}:${PORT}` });
+  });
 
   if (process.env.NODE_ENV !== "production") {
     /* Vite dev server — HMR stays on HTTP so the desktop browser works normally */

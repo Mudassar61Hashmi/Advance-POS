@@ -14,6 +14,7 @@ import { DataManager }     from "./pages/DataManager";
 import { Coupons }         from "./pages/Coupons";
 import UserManagement      from "./pages/UserManagement";
 import MobileScan          from "./pages/MobileScan";
+import PublicReceipt       from "./pages/PublicReceipt";
 import { DashboardLayout } from "./layouts/DashboardLayout";
 import { ReceiptModal }    from "./components/ReceiptModal";
 
@@ -36,6 +37,12 @@ function restoreUser(): User | null {
 const MOBILE_SCAN_ROUTE = window.location.pathname.startsWith("/mobile-scan");
 const MOBILE_SCAN_SESSION = MOBILE_SCAN_ROUTE
   ? new URLSearchParams(window.location.search).get("session")
+  : null;
+
+/* Public receipt verification — /receipt/:saleId */
+const RECEIPT_ROUTE = window.location.pathname.startsWith("/receipt/");
+const RECEIPT_SALE_ID = RECEIPT_ROUTE
+  ? window.location.pathname.split("/")[2] || null
   : null;
 
 /* The main POS application (always renders when not on mobile-scan route) */
@@ -145,8 +152,7 @@ function MainPOS() {
 }
 
 export default function App() {
-  if (MOBILE_SCAN_ROUTE) {
-    return <MobileScan sessionId={MOBILE_SCAN_SESSION} />;
-  }
+  if (MOBILE_SCAN_ROUTE) return <MobileScan sessionId={MOBILE_SCAN_SESSION} />;
+  if (RECEIPT_ROUTE)     return <PublicReceipt saleId={RECEIPT_SALE_ID} />;
   return <MainPOS />;
 }
